@@ -16,7 +16,9 @@
 -->
 <style>
   :root {
-    --bg: #191919;   /* 노션 다크 배경색 */
+    color-scheme: dark;   /* 다크 임베드 위에서 흰 바탕이 깔리지 않게 함 */
+    --bg: transparent;    /* 노션 배경이 그대로 비침. ?bg=191919 처럼 고정색도 가능 */
+    --ring: #191919;
     --card: #2b2b2b;
     --ink: #f4f4f5;
     --digit: #f4f4f5;   /* 숫자 색 (아래 색상 버튼으로 변경) */
@@ -105,7 +107,7 @@
     border-radius: 50%; border: 1px solid rgba(255, 255, 255, .25);
     background: var(--c); cursor: pointer;
   }
-  .tones button.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--sub); }
+  .tones button.on { box-shadow: 0 0 0 2px var(--ring), 0 0 0 3.5px var(--sub); }
 </style>
 </head>
 <body>
