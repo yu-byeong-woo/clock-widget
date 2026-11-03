@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flip Clock</title>
+<!--
+  플립 시계 위젯 (Asia/Seoul · 24시간제 · 1초 갱신)
+  사용법
+  - Notion: 페이지에 /embed → 이 파일을 올린 주소(GitHub Pages 등) 붙여넣기.
+    임베드 블록 크기를 줄이거나 늘려도 숫자가 같이 맞춰집니다 (약 340x200 권장).
+  - Übersicht: 함께 만든 clock.jsx 의 URL 상수만 바꿔서 widgets 폴더에 넣기.
+  - 색 바꾸기: 아래 :root 의 --bg / --card / --ink 값만 수정.
+  - 날짜를 숨기려면 주소 뒤에 ?date=0 을 붙이세요.
+-->
+<style>
+  :root {
+    --bg: #17181c;
+    --card: #262a33;
+    --ink: #f4f4f5;
+    --sub: #8b8f9a;
+    --seam: rgba(0, 0, 0, .55);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+    color: var(--ink);
+    overflow: hidden;
+  }
+
+  /* 컨테이너 크기에 맞춰 모든 치수가 변함 */
+  .widget {
+    container-type: size;
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 5cqh;
+  }
+  .clock {
+    --w: min(17cqw, 25cqh);
+    --h: calc(var(--w) * 1.35);
+    display: flex; align-items: center; gap: calc(var(--w) * .12);
+  }
+  .pair { display: flex; gap: calc(var(--w) * .07); }
+  .colon { display: flex; flex-direction: column; gap: calc(var(--w) * .22); }
+  .colon i {
+    width: calc(var(--w) * .1); height: calc(var(--w) * .1);
+    border-radius: 50%; background: var(--sub);
+    animation: blink 2s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* 숫자 한 칸: 위/아래 반쪽 + 접히는 반쪽 */
+  .digit {
+    position: relative;
+    width: var(--w); height: var(--h);
+    font-size: calc(var(--w) * 1.05);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .half, .leaf {
+    position: absolute; left: 0; right: 0;
+    height: 50%; overflow: hidden;
+    background: var(--card);
+  }
+  .half span, .leaf span {
+    display: block; height: var(--h); line-height: var(--h); text-align: center;
+  }
+  .up, .leaf.fu { top: 0; border-radius: calc(var(--w) * .12) calc(var(--w) * .12) 0 0; }
+  .low, .leaf.fl { bottom: 0; border-radius: 0 0 calc(var(--w) * .12) calc(var(--w) * .12); }
+  .low span, .leaf.fl span { margin-top: calc(var(--h) / -2); }
+  .digit::after { /* 가운데 이음선 */
+    content: ""; position: absolute; left: 0; right: 0; top: 50%;
+    height: 1px; background: var(--seam); z-index: 5;
+  }
+  .leaf { z-index: 3; backface-visibility: hidden; display: none; }
+  .leaf.fu { transform-origin: bottom; }
+  .leaf.fl { transform-origin: top; }
+  .flipping .leaf { display: block; }
+  .flipping .fu { animation: fold .28s ease-in forwards; }
+  .flipping .fl { animation: unfold .28s .28s ease-out both; }
+  @keyframes fold   { to   { transform: perspective(500px) rotateX(-90deg); } }
+  @keyframes unfold { from { transform: perspective(500px) rotateX(90deg); } to { transform: none; } }
+
+  .date {
+    font-size: clamp(11px, 5.2cqh, 22px);
+    color: var(--sub); letter-spacing: .02em; white-space: nowrap;
+  }
+  .nodate .date { display: none; }
+</style>
+</head>
+<body>
+<div class="widget" id="widget">
+  <div class="clock" id="clock"></div>
+  <div class="date" id="date"></div>
+</div>
+
+<script>
+(function () {
+  var TZ = 'Asia/Seoul';
+  var fmt = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: TZ, hourCycle: 'h23',
+    year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  if (/[?&]date=0/.test(location.search)) document.body.classList.add('nodate');
+
+  // 숫자 칸 4개(HH MM)와 구분점 구성
+  var clockEl = document.getElementById('clock');
+  var digits = [];
+  function makeDigit() {
+    var d = document.createElement('div');
+    d.className = 'digit';
+    d.innerHTML =
+      '<div class="half up"><span></span></div>' +
+      '<div class="half low"><span></span></div>' +
+      '<div class="leaf fu"><span></span></div>' +
+      '<div class="leaf fl"><span></span></div>';
+    d.cur = '';
+    digits.push(d);
+    return d;
+  }
+  function makePair() {
+    var p = document.createElement('div');
+    p.className = 'pair';
+    p.appendChild(makeDigit());
+    p.appendChild(makeDigit());
+    return p;
+  }
+  var colon = document.createElement('div');
+  colon.className = 'colon';
+  colon.innerHTML = '<i></i><i></i>';
+  clockEl.appendChild(makePair());
+  clockEl.appendChild(colon);
+  clockEl.appendChild(makePair());
+
+  function setText(d, sel, v) {
+    d.querySelector(sel + ' span').textContent = v;
+  }
+  function setDigit(d, v) {
+    if (d.cur === v) return;
+    var old = d.cur;
+    d.cur = v;
+    if (old === '') { // 첫 표시는 애니메이션 없이
+      setText(d, '.up', v); setText(d, '.low', v);
+      setText(d, '.fu', v); setText(d, '.fl', v);
+      return;
+    }
+    setText(d, '.up', v);      // 위 반쪽은 새 숫자로 (접히는 앞면이 옛 숫자를 덮음)
+    setText(d, '.fu', old);
+    setText(d, '.fl', v);
+    d.classList.remove('flipping');
+    void d.offsetWidth;        // 애니메이션 재시작
+    d.classList.add('flipping');
+    clearTimeout(d.t);
+    d.t = setTimeout(function () {
+      setText(d, '.low', v);
+      d.classList.remove('flipping');
+    }, 580);
+  }
+
+  var dateEl = document.getElementById('date');
+  function tick() {
+    var p = {};
+    fmt.formatToParts(new Date()).forEach(function (x) { p[x.type] = x.value; });
+    var hhmm = p.hour + p.minute;
+    for (var i = 0; i < 4; i++) setDigit(digits[i], hhmm.charAt(i));
+    dateEl.textContent = p.year + '년 ' + p.month + ' ' + p.day + '일 ' + p.weekday;
+  }
+  // low 반쪽 초기값이 없을 때를 위해 첫 틱은 즉시 실행
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>
