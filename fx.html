@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>환율 위젯</title>
+<!--
+  환율 위젯 (원화 KRW 기준 · 전 세계 통화 검색/추가)
+  사용법
+  - Notion: 페이지에 /embed → 이 파일을 올린 주소(GitHub Pages) 붙여넣기.
+  - Übersicht: fx.jsx 의 URL 상수를 이 주소로 바꿔서 widgets 폴더에 넣기.
+  - 하단 + 버튼으로 통화를 검색해 추가, 행에 마우스를 올리면 나오는 × 로 삭제 (브라우저에 저장).
+  - 테마: 기본은 시스템 라이트/다크를 따르고 ?theme=light / ?theme=dark 로 고정.
+  - 배경: ?bg=transparent(기본) 또는 ?bg=ffffff.
+  - 시작 통화 지정: ?list=USD,JPY,EUR  (저장된 목록이 없을 때만 적용)
+  데이터: 무료 공개 API(fawazahmed0/currency-api, 실패 시 open.er-api.com).
+  환율은 하루 1회 갱신되는 일별 기준값이며, 위젯은 1시간마다 새로 확인합니다.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: transparent;
+    --card: #1f1f1f;
+    --line: rgba(255, 255, 255, .09);
+    --ink: #f2f2f2;
+    --sub: #8d8d8d;
+    --chip: rgba(255, 255, 255, .07);
+    --up: #ff6b6b;
+    --down: #5aa2ff;
+    --flat: #8d8d8d;
+  }
+  :root[data-theme="light"] {
+    --card: #ffffff;
+    --line: rgba(0, 0, 0, .08);
+    --ink: #1c1c1e;
+    --sub: #8a8a8e;
+    --chip: rgba(0, 0, 0, .05);
+    --up: #e5484d;
+    --down: #2f6fed;
+    --flat: #8a8a8e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+    color: var(--ink); overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { height: 100%; padding: 8px; container-type: size; }
+  .card {
+    position: relative; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--card);
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    padding: 12px 14px 10px;
+  }
+
+  .head { display: flex; align-items: baseline; justify-content: space-between; flex: none; padding-bottom: 6px; }
+  .title { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .asof { font-size: 11px; color: var(--sub); }
+
+  .list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+  .list::-webkit-scrollbar { display: none; }
+  .row {
+    position: relative;
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px;
+    padding: 8px 22px 8px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .row:last-child { border-bottom: 0; }
+  .code { font-size: 14px; font-weight: 700; }
+  .name { font-size: 11px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .left { min-width: 0; }
+  .right { text-align: right; }
+  .rate { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chg { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--flat); }
+  .chg.up { color: var(--up); }
+  .chg.down { color: var(--down); }
+  .del {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; border: 0; border-radius: 50%;
+    background: var(--chip); color: var(--sub); font-size: 12px; line-height: 18px;
+    cursor: pointer; opacity: 0; transition: opacity .15s;
+  }
+  .row:hover .del { opacity: 1; }
+  .empty, .msg { padding: 18px 0; text-align: center; font-size: 12px; color: var(--sub); }
+
+  .foot { flex: none; display: flex; justify-content: center; padding-top: 6px; }
+  .add {
+    width: 26px; height: 26px; border-radius: 50%; border: 0;
+    background: var(--chip); color: var(--ink); font-size: 16px; line-height: 26px;
+    cursor: pointer;
+  }
+  .add:hover { filter: brightness(1.2); }
+
+  /* 통화 검색 패널 */
+  .panel {
+    position: absolute; inset: 0; z-index: 10;
+    background: var(--card); border-radius: 14px;
+    display: none; flex-direction: column; padding: 12px 14px 10px;
+  }
+  .panel.open { display: flex; }
+  .sbar { display: flex; gap: 8px; flex: none; }
+  .sbar input {
+    flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--chip); border: 0; border-radius: 8px; padding: 7px 10px; outline: none;
+  }
+  .sbar button {
+    border: 0; background: transparent; color: var(--sub); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .results { flex: 1; min-height: 0; overflow-y: auto; margin-top: 6px; scrollbar-width: none; }
+  .results::-webkit-scrollbar { display: none; }
+  .res {
+    display: flex; justify-content: space-between; gap: 8px; width: 100%;
+    border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left;
+    padding: 7px 2px; border-bottom: 1px dashed var(--line); cursor: pointer;
+  }
+  .res:hover { background: var(--chip); }
+  .res b { font-size: 13px; }
+  .res span { font-size: 12px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .res.on { opacity: .45; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="head"><span class="title">환율 · KRW</span><span class="asof" id="asof"></span></div>
+    <div class="list" id="list"></div>
+    <div class="foot"><button class="add" id="add" aria-label="통화 추가">+</button></div>
+
+    <div class="panel" id="panel">
+      <div class="sbar">
+        <input id="q" type="search" placeholder="통화 검색 (예: 달러, THB, 태국)" autocomplete="off">
+        <button id="close">닫기</button>
+      </div>
+      <div class="results" id="results"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var root = document.documentElement;
+  var KEY = 'fx-widget-list';
+
+  // ===== 테마 / 배경 =====
+  var themeQ = location.search.match(/[?&]theme=(light|dark)/);
+  var mq = window.matchMedia('(prefers-color-scheme: light)');
+  function applyTheme() {
+    var t = themeQ ? themeQ[1] : (mq.matches ? 'light' : 'dark');
+    root.dataset.theme = t;
+    root.style.colorScheme = t;
+  }
+  applyTheme();
+  if (!themeQ) { if (mq.addEventListener) mq.addEventListener('change', applyTheme); else if (mq.addListener) mq.addListener(applyTheme); }
+  var bg = location.search.match(/[?&]bg=([^&]+)/);
+  if (bg) {
+    var v = decodeURIComponent(bg[1]).replace('#', '');
+    if (v === 'transparent' || /^[0-9a-fA-F]{3,8}$/.test(v)) root.style.setProperty('--bg', v === 'transparent' ? v : '#' + v);
+  }
+
+  // ===== 통화 목록 (저장값 → ?list= → 기본) =====
+  var list = null;
+  try { list = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  if (!Array.isArray(list) || !list.length) {
+    var lq = location.search.match(/[?&]list=([^&]+)/);
+    list = lq ? decodeURIComponent(lq[1]).toUpperCase().split(',').filter(Boolean) : ['USD', 'JPY', 'EUR'];
+  }
+  function saveList() { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {} }
+
+  var names = new Intl.DisplayNames(['ko'], { type: 'currency' });
+  function nameOf(c) { try { return names.of(c) || c; } catch (e) { return c; } }
+
+  // ===== 환율 데이터 =====
+  var data = null;   // { date, cur: {usd: n,...}, prev: {...}|null }
+  var CDN = 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@';
+  function iso(d) { return d.toISOString().slice(0, 10); }
+  function shift(d, n) { var x = new Date(d.getTime()); x.setUTCDate(x.getUTCDate() + n); return x; }
+  function get(url) {
+    return fetch(url, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error(r.status); return r.json();
+    });
+  }
+  function pinned(d) { return get(CDN + iso(d) + '/v1/currencies/krw.json'); }
+  function firstOf(start, tries) { // 최신 날짜부터 거꾸로 시도
+    var i = 0;
+    function next() {
+      if (i >= tries) return Promise.reject(new Error('no data'));
+      var d = shift(start, -i++);
+      return pinned(d).then(function (j) { return j; }, next);
+    }
+    return next();
+  }
+  function load() {
+    var today = new Date();
+    return firstOf(today, 4).then(function (cur) {
+      var d = new Date(cur.date + 'T00:00:00Z');
+      return firstOf(shift(d, -1), 3).then(function (prev) { return { date: cur.date, cur: cur.krw, prev: prev.krw }; },
+                                            function () { return { date: cur.date, cur: cur.krw, prev: null }; });
+    }).catch(function () { // 예비 API: 전일 비교 없음
+      return get('https://open.er-api.com/v6/latest/KRW').then(function (j) {
+        var o = {}; Object.keys(j.rates).forEach(function (k) { o[k.toLowerCase()] = j.rates[k]; });
+        return { date: new Date(j.time_last_update_unix * 1000).toISOString().slice(0, 10), cur: o, prev: null };
+      });
+    });
+  }
+
+  // 1통화 단가가 너무 작거나 크면 100·1000 단위로 환산해 보여줌
+  function unitFor(won) { return won >= 10 ? 1 : (won >= 1 ? 100 : (won >= .01 ? 1000 : 10000)); }
+  function fmt(n) {
+    var digits = n >= 1000 ? 2 : (n >= 100 ? 2 : 3);
+    return n.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: digits });
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  function render() {
+    var el = $('list');
+    if (!data) { el.innerHTML = '<div class="msg">환율을 불러오는 중…</div>'; return; }
+    $('asof').textContent = data.date.slice(5).replace('-', '.') + ' 기준';
+    if (!list.length) { el.innerHTML = '<div class="empty">아래 + 버튼으로 통화를 추가하세요</div>'; return; }
+    el.innerHTML = list.map(function (c) {
+      var r = data.cur[c.toLowerCase()];
+      if (!r) return '<div class="row"><div class="left"><div class="code">' + esc(c) + '</div><div class="name">데이터 없음</div></div><div class="right"></div><button class="del" data-c="' + esc(c) + '" aria-label="삭제">×</button></div>';
+      var won = 1 / r, u = unitFor(won), val = won * u, chg = '', cls = '';
+      if (data.prev && data.prev[c.toLowerCase()]) {
+        var diff = (won - 1 / data.prev[c.toLowerCase()]) * u, pct = diff / (val - diff) * 100;
+        cls = Math.abs(diff) < 0.005 ? '' : (diff > 0 ? 'up' : 'down');
+        chg = (diff > 0 ? '+' : (diff < 0 ? '−' : '')) + fmt(Math.abs(diff)) + ' (' + Math.abs(pct).toFixed(2) + '%)';
+      }
+      var sub = nameOf(c.toUpperCase()) + (u > 1 ? ' · ' + u.toLocaleString() + ' 단위' : '');
+      return '<div class="row"><div class="left"><div class="code">' + esc(c) + '</div><div class="name">' + esc(sub) + '</div></div>' +
+             '<div class="right"><div class="rate">' + fmt(val) + '</div><div class="chg ' + cls + '">' + (chg || '—') + '</div></div>' +
+             '<button class="del" data-c="' + esc(c) + '" aria-label="삭제">×</button></div>';
+    }).join('');
+  }
+  $('list').addEventListener('click', function (e) {
+    var b = e.target.closest('.del'); if (!b) return;
+    list = list.filter(function (c) { return c !== b.dataset.c; });
+    saveList(); render();
+  });
+
+  // ===== 검색 패널 =====
+  function search() {
+    var q = $('q').value.trim().toLowerCase();
+    var keys = data ? Object.keys(data.cur).map(function (k) { return k.toUpperCase(); }) : [];
+    var out = keys.filter(function (c) {
+      var n = nameOf(c);
+      if (c === 'KRW' || n === c) return false;            // 암호화폐·비표준 코드 제외
+      return !q || c.toLowerCase().indexOf(q) >= 0 || n.toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 80);
+    $('results').innerHTML = out.length ? out.map(function (c) {
+      return '<button class="res' + (list.indexOf(c) >= 0 ? ' on' : '') + '" data-c="' + c + '"><b>' + c + '</b><span>' + esc(nameOf(c)) + '</span></button>';
+    }).join('') : '<div class="msg">' + (data ? '검색 결과가 없습니다' : '환율을 불러오는 중…') + '</div>';
+  }
+  function openPanel() { $('panel').classList.add('open'); $('q').value = ''; search(); $('q').focus(); }
+  function closePanel() { $('panel').classList.remove('open'); }
+  $('add').addEventListener('click', openPanel);
+  $('close').addEventListener('click', closePanel);
+  $('q').addEventListener('input', search);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePanel(); });
+  $('results').addEventListener('click', function (e) {
+    var b = e.target.closest('.res'); if (!b) return;
+    var c = b.dataset.c;
+    if (list.indexOf(c) < 0) { list.push(c); saveList(); render(); }
+    closePanel();
+  });
+
+  // ===== 갱신: 열 때 + 1시간마다 + 탭이 다시 보일 때 =====
+  var last = 0;
+  function refresh() {
+    last = Date.now();
+    load().then(function (d) { data = d; render(); }, function () {
+      if (!data) $('list').innerHTML = '<div class="msg">환율을 불러오지 못했습니다</div>';
+    });
+  }
+  render(); refresh();
+  setInterval(refresh, 60 * 60 * 1000);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && Date.now() - last > 30 * 60 * 1000) refresh();
+  });
+})();
+</script>
+</body>
+</html>
