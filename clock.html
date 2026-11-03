@@ -12,11 +12,12 @@
   - Übersicht: 함께 만든 clock.jsx 의 URL 상수만 바꿔서 widgets 폴더에 넣기.
   - 색 바꾸기: 아래 :root 의 --bg / --card / --ink 값만 수정.
   - 날짜를 숨기려면 주소 뒤에 ?date=0 을 붙이세요.
+  - 테마: 기본은 시스템 라이트/다크를 따라가며, ?theme=light / ?theme=dark 로 고정할 수 있습니다.
   - 배경 바꾸기: ?bg=transparent (투명) 또는 ?bg=ffffff (16진수 색상).
 -->
 <style>
   :root {
-    color-scheme: dark;   /* 다크 임베드 위에서 흰 바탕이 깔리지 않게 함 */
+    color-scheme: light dark;   /* 임베드 위에서 흰/검정 바탕이 깔리지 않게 함 */
     --bg: transparent;    /* 노션 배경이 그대로 비침. ?bg=191919 처럼 고정색도 가능 */
     --ring: #191919;
     --card: #2b2b2b;
@@ -24,6 +25,13 @@
     --digit: #f4f4f5;   /* 숫자 색 (아래 색상 버튼으로 변경) */
     --sub: #8f8f8f;
     --seam: rgba(0, 0, 0, .55);
+  }
+  /* 라이트 테마: 시스템 설정을 따르거나 ?theme=light 로 고정 */
+  :root[data-theme="light"] {
+    --card: #ececea;
+    --sub: #787774;
+    --seam: rgba(0, 0, 0, .12);
+    --ring: #ffffff;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); }
@@ -191,26 +199,46 @@
     }, 580);
   }
 
-  // 숫자 색상 버튼 (선택값은 브라우저에 저장)
-  var TONES = ['#f4f4f5', '#b4b7c0', '#8b8f9a', '#5c606b'];
+  // 테마(라이트/다크) 적용: ?theme= 가 있으면 고정, 없으면 시스템 설정을 따름
+  var themeQ = location.search.match(/[?&]theme=(light|dark)/);
+  var mq = window.matchMedia('(prefers-color-scheme: light)');
+  var root = document.documentElement;
+
+  // 숫자 색상 버튼 (테마별 4색, 선택 순번은 브라우저에 저장)
+  var TONES = {
+    dark:  ['#f4f4f5', '#b4b7c0', '#8b8f9a', '#5c606b'],
+    light: ['#2b2b2b', '#54565f', '#8b8f9a', '#b4b7c0']
+  };
   var tonesEl = document.getElementById('tones');
-  function setTone(c) {
-    document.documentElement.style.setProperty('--digit', c);
-    try { localStorage.setItem('flip-clock-tone', c); } catch (e) {}
-    Array.prototype.forEach.call(tonesEl.children, function (b) {
-      b.classList.toggle('on', b.dataset.c === c);
+  var toneIdx = 0;
+  try { toneIdx = parseInt(localStorage.getItem('flip-clock-tone-idx'), 10) || 0; } catch (e) {}
+  function setTone(i) {
+    toneIdx = i;
+    root.style.setProperty('--digit', TONES[root.dataset.theme][i]);
+    try { localStorage.setItem('flip-clock-tone-idx', i); } catch (e) {}
+    Array.prototype.forEach.call(tonesEl.children, function (b, j) {
+      b.classList.toggle('on', j === i);
     });
   }
-  TONES.forEach(function (c) {
-    var b = document.createElement('button');
-    b.dataset.c = c; b.style.setProperty('--c', c);
-    b.setAttribute('aria-label', '숫자 색상 ' + c);
-    b.addEventListener('click', function () { setTone(c); });
-    tonesEl.appendChild(b);
-  });
-  var saved = null;
-  try { saved = localStorage.getItem('flip-clock-tone'); } catch (e) {}
-  setTone(TONES.indexOf(saved) >= 0 ? saved : TONES[0]);
+  function applyTheme() {
+    var t = themeQ ? themeQ[1] : (mq.matches ? 'light' : 'dark');
+    root.dataset.theme = t;
+    root.style.colorScheme = t;
+    tonesEl.innerHTML = '';
+    TONES[t].forEach(function (c, i) {
+      var b = document.createElement('button');
+      b.style.setProperty('--c', c);
+      b.setAttribute('aria-label', '숫자 색상 ' + (i + 1));
+      b.addEventListener('click', function () { setTone(i); });
+      tonesEl.appendChild(b);
+    });
+    setTone(toneIdx);
+  }
+  applyTheme();
+  if (!themeQ) {
+    if (mq.addEventListener) mq.addEventListener('change', applyTheme);
+    else if (mq.addListener) mq.addListener(applyTheme);
+  }
 
   var dateEl = document.getElementById('date');
   function tick() {
