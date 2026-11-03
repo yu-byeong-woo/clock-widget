@@ -12,13 +12,14 @@
   - Übersicht: 함께 만든 clock.jsx 의 URL 상수만 바꿔서 widgets 폴더에 넣기.
   - 색 바꾸기: 아래 :root 의 --bg / --card / --ink 값만 수정.
   - 날짜를 숨기려면 주소 뒤에 ?date=0 을 붙이세요.
+  - 배경 바꾸기: ?bg=transparent (투명) 또는 ?bg=ffffff (16진수 색상).
 -->
 <style>
   :root {
-    --bg: #17181c;
-    --card: #262a33;
+    --bg: #191919;   /* 노션 다크 배경색 */
+    --card: #2b2b2b;
     --ink: #f4f4f5;
-    --sub: #8b8f9a;
+    --sub: #8f8f8f;
     --seam: rgba(0, 0, 0, .55);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -106,6 +107,15 @@
   });
 
   if (/[?&]date=0/.test(location.search)) document.body.classList.add('nodate');
+
+  // ?bg=transparent 또는 ?bg=rrggbb 로 배경 지정
+  var bg = location.search.match(/[?&]bg=([^&]+)/);
+  if (bg) {
+    var v = decodeURIComponent(bg[1]).replace('#', '');
+    if (v === 'transparent' || /^[0-9a-fA-F]{3,8}$/.test(v)) {
+      document.documentElement.style.setProperty('--bg', v === 'transparent' ? v : '#' + v);
+    }
+  }
 
   // 숫자 칸 4개(HH MM)와 구분점 구성
   var clockEl = document.getElementById('clock');
